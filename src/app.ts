@@ -122,8 +122,21 @@ export class MADEApp {
       this.activePoints = [];
     }
 
-    // ── Interpreter (V3+) ───────────────────────────────────────────────────
+    // ── Voice command dispatch ───────────────────────────────────────────────
     const voice = this.pendingVoice.splice(0);
+    for (const ev of voice) {
+      if (ev.kind === 'command') {
+        if (ev.intent === 'lock')   { this.lockTop();  break; }
+        if (ev.intent === 'reject') { this.reject();   break; }
+        if (ev.intent?.startsWith('concept:')) {
+          const label = ev.intent.slice('concept:'.length);
+          this.forceConcept(label);
+          break;
+        }
+      }
+    }
+
+    // ── Interpreter (V3+) ───────────────────────────────────────────────────
     if (this.graph.strokes.length) {
       this.graph.hypotheses = this.m.interpreter.update(
         this.graph.strokes, voice, { graph: this.graph, poseStates: poses }

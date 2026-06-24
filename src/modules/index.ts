@@ -40,13 +40,14 @@ export interface Modules {
 export function createModules(): Modules {
   const generationBackend = new LocalSidecar();
 
+  const shapeRecognizer = new ClipEmbeddingRecognizer();
   return {
     handTracking:       new MediaPipeHandTracking(),
     gestureRecognizer:  new RuleGestureRecognizer(),
     spatialMapping:     new ScreenPlaneMapping(),
     speech:             new WebSpeech(),
-    shapeRecognizer:    new ClipEmbeddingRecognizer(),
-    interpreter:        new HypothesisEngine(),
+    shapeRecognizer,
+    interpreter:        new HypothesisEngine(shapeRecognizer),
     formProvider:       new FormProviderChain([
                           new TemplateProvider(),
                           new GenerationProvider(generationBackend),
