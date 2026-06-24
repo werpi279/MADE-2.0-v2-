@@ -1,60 +1,78 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { GeometryEngine, SculptOp } from '../../types/modules';
-import type { IntentGraph, Mesh } from '../../types/intent-graph';
+import type { IntentGraph, Mesh, PartNode } from '../../types/intent-graph';
 import { SculptEngine } from './sculpt-engine';
 import { BubbleRegion } from './bubble-region';
 import { createPlaceholderMesh } from './primitives';
 
-// V1: sculpt engine wired. V3+: assemble builds from graph.nodes using TubeBuilder/FrameExtruder/CSG.
-// Swappable to SdfVoxelEngine via config.geometryEngine = 'sdf-voxel'.
+const CLAY_MAT = new THREE.MeshStandardMaterial({ color: 0xc4845a, roughness: 0.88, metalness: 0 });
 
+// V1: sculpt engine wired. V3: assemble builds from graph.nodes.
+// V3+: TubeBuilder/FrameExtruder/CSG blend joints. Swap to SdfVoxelEngine via config.
 export class MeshEngine implements GeometryEngine {
   private readonly placeholder: Mesh;
-  // Per-mesh SculptEngine cache — keyed by mesh UUID.
-  // A new engine is built on first sculpt call and reused until the mesh is replaced.
   private readonly engines = new Map<string, SculptEngine>();
+  private assemblyCache: { key: string; mesh: THREE.Mesh } | null = null;
 
   constructor() {
     this.placeholder = createPlaceholderMesh();
   }
 
   assemble(graph: IntentGraph): Mesh | null {
-    // V3+: walk graph.nodes, place parts, blend joints, snap constraints.
-    // For now, return the placeholder so the renderer always has something to display.
     if (graph.nodes.length === 0) return this.placeholder;
-    return this.placeholder;
+
+    const key = _nodesKey(graph.nodes);
+    if (this.assemblyCache?.key === key) return this.assemblyCache.mesh;
+
+    const geos: THREE.BufferGeometry[] = [];
+    for (const node of graph.nodes) {
+      const geo = _nodeGeo(node);
+      // Bake transform into geometry so we can merge heterogeneous primitives
+      const m4 = new THREE.Matrix4().compose(
+        new THREE.Vector3(...node.transform.position),
+        new THREE.Quaternion(node.transform.rotation.x, node.transform.rotation.y,
+                             node.transform.rotation.z, node.transform.rotation.w),
+        new THREE.Vector3(...node.transform.scale),
+      );
+      geo.applyMatrix4(m4);
+      geo.computeVertexNormals();
+      geos.push(geo);
+    }
+
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos) ?? geos[0];
+    merged.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(merged, CLAY_MAT.clone());
+    this.assemblyCache = { key, mesh };
+    return mesh;
   }
 
   sculpt(mesh: Mesh, op: SculptOp): Mesh {
-    const engine = this._engine(mesh);
+    const engine  = this._engine(mesh);
     const localPt = new THREE.Vector3(...op.position);
 
     switch (op.kind) {
       case 'push':
       case 'pull': {
-        const hit  = engine.query(localPt);
-        const sign = op.kind === 'push' ? 1 : -1;
+        const hit   = engine.query(localPt);
+        const sign  = op.kind === 'push' ? 1 : -1;
         const delta = hit.normal.multiplyScalar(sign * op.magnitude);
         engine.deform(localPt, delta, op.radius);
         break;
       }
-      case 'smooth': {
-        // Zero delta → positions unchanged, Laplacian smooth still runs over
-        // every vertex inside the falloff radius.
+      case 'smooth':
         engine.deform(localPt, new THREE.Vector3(), op.radius);
         break;
-      }
       case 'scale': {
         const bubble = new BubbleRegion(localPt, op.radius, engine.getPositions());
         engine.scaleCapture(bubble.weights, localPt, 1 + op.magnitude);
         break;
       }
     }
-
     return mesh;
   }
 
-  /** Call after a sculpt session ends so the BVH is rebuilt once (not per frame). */
   rebuildBVH(mesh: Mesh): void {
     this.engines.get(mesh.uuid)?.rebuildBVH();
   }
@@ -67,4 +85,19 @@ export class MeshEngine implements GeometryEngine {
     }
     return e;
   }
+}
+
+function _nodeGeo(node: PartNode): THREE.BufferGeometry {
+  const [w, h, d] = node.params.size;
+  switch (node.concept) {
+    case 'sphere':   return new THREE.SphereGeometry(w / 2, 16, 12);
+    case 'cylinder': return new THREE.CylinderGeometry(w / 2, w / 2, h, 12);
+    default:         return new THREE.BoxGeometry(w, h, d);
+  }
+}
+
+function _nodesKey(nodes: PartNode[]): string {
+  return nodes.map(n =>
+    `${n.id}:${n.concept}:${n.params.size.join(',')}:${n.transform.position.join(',')}`
+  ).join('|');
 }
