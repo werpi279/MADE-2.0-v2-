@@ -19,6 +19,12 @@ function setStatus(msg: string): void {
 }
 app.onStatus = setStatus;
 
+// ── Satisfaction-signal → auto-reveal force-input ───────────────────────────
+app.onSatisfaction = (state) => {
+  const wrap = document.getElementById('force-wrap');
+  if (wrap) wrap.style.display = state.showForceInput ? 'flex' : 'none';
+};
+
 // ── Lock / Reject / Force-input buttons ─────────────────────────────────────
 const controls = document.createElement('div');
 controls.id = 'controls';

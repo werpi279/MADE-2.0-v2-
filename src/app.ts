@@ -1,7 +1,7 @@
 import { createModules, type Modules } from './modules/index';
 import { emptyGraph } from './types/intent-graph';
 import type { IntentGraph, Stroke, Quat } from './types/intent-graph';
-import type { AppScene, FeedbackState, PoseState } from './types/modules';
+import type { AppScene, FeedbackState, PoseState, UiEvent, SatisfactionState } from './types/modules';
 
 const IDENTITY_QUAT: Quat = { x: 0, y: 0, z: 0, w: 1 };
 
@@ -16,11 +16,15 @@ export class MADEApp {
   private activePoints: { x: number; y: number }[] = [];
   private strokeActive = false;
 
-  // V3+ voice events (accumulated between frames)
+  // V4 voice events (accumulated between frames)
   private pendingVoice: import('./types/modules').VoiceEvent[] = [];
 
-  // Status callback for main.ts to update the overlay
-  onStatus?: (msg: string) => void;
+  // V5 UI events (accumulated, flushed to SatisfactionSignal each tick)
+  private uiEvents: UiEvent[] = [];
+
+  // Callbacks for main.ts overlays
+  onStatus?:       (msg: string) => void;
+  onSatisfaction?: (state: SatisfactionState) => void;
 
   constructor(container: HTMLElement) {
     this.m     = createModules();
@@ -56,6 +60,7 @@ export class MADEApp {
     this.graph.hypotheses = [];
     this.graph.strokes = [];
     this.strokes = [];
+    this.uiEvents.push({ kind: 'lock', nodeId: edit.nodeId, timestamp: Date.now() });
     this.m.store.save(this.graph);
   }
 
@@ -66,14 +71,50 @@ export class MADEApp {
     this.strokes = [];
     this.activePoints = [];
     this.strokeActive = false;
+    this.uiEvents.push({ kind: 'reject', timestamp: Date.now() });
   }
 
-  /** Force a concept on the most recently locked node. */
-  forceConcept(label: string): void {
-    const last = this.graph.nodes[this.graph.nodes.length - 1];
-    if (!last) return;
-    const edit = this.m.interpreter.force(label, last.id);
-    this._applyEdit(edit);
+  /** Force a concept by name: namer→template→generation fallthrough.
+   *  If strokes are pending, commits them with the forced concept.
+   *  If a node is already locked, reshapes it.
+   */
+  async forceConcept(label: string): Promise<void> {
+    this.uiEvents.push({ kind: 'force', timestamp: Date.now() });
+    const form = await this.m.formProvider.provide({ concept: label });
+
+    if (this.graph.strokes.length > 0 && this.graph.hypotheses.length > 0) {
+      // Override pending hypothesis concept and commit it
+      const h = this.graph.hypotheses[0];
+      const overridden = { ...h, concept: label, previewMesh: form ?? h.previewMesh };
+      const edit = this.m.interpreter.commit(overridden);
+      if (form?.userData?.size && edit.data) {
+        edit.data = {
+          ...edit.data,
+          concept: label,
+          params: {
+            size: form.userData.size as [number, number, number],
+            proportion: [1, 1, 1],
+            orientation: IDENTITY_QUAT,
+          },
+        };
+      } else if (edit.data) {
+        edit.data = { ...edit.data, concept: label };
+      }
+      this._applyEdit(edit);
+      this.graph.hypotheses = [];
+      this.graph.strokes = [];
+      this.strokes = [];
+      this.uiEvents.push({ kind: 'lock', nodeId: edit.nodeId, timestamp: Date.now() });
+    } else {
+      // Reshape the most recently locked node
+      const last = this.graph.nodes[this.graph.nodes.length - 1];
+      if (!last) return;
+      last.concept = label;
+      if (form?.userData?.size) {
+        last.params.size = form.userData.size as [number, number, number];
+      }
+    }
+
     this.m.store.save(this.graph);
   }
 
@@ -97,8 +138,6 @@ export class MADEApp {
       : [];
 
     // ── Pick dominant (right) + non-dominant (left) hand ────────────────────
-    // In the mirrored camera feed, the user's right hand appears on the image
-    // left (x < 0.5 for lm[9]). MediaPipe reports it as 'Right' after we flip.
     const dominant    = poses.find(p => p.hand === 'right') ?? null;
     const nonDominant = poses.find(p => p.hand === 'left')  ?? null;
 
@@ -113,7 +152,7 @@ export class MADEApp {
       if (this.activePoints.length >= 3) {
         const stroke = this.m.spatialMapping.mapStroke(
           this.activePoints,
-          IDENTITY_QUAT,  // V2: always screen-parallel; V3+ uses workpiece quat
+          IDENTITY_QUAT,
         );
         this.strokes.push(stroke);
         this.graph.strokes = [...this.strokes];
@@ -130,41 +169,39 @@ export class MADEApp {
         if (ev.intent === 'reject') { this.reject();   break; }
         if (ev.intent?.startsWith('concept:')) {
           const label = ev.intent.slice('concept:'.length);
-          this.forceConcept(label);
+          void this.forceConcept(label);
           break;
         }
       }
     }
 
-    // ── Interpreter (V3+) ───────────────────────────────────────────────────
+    // ── Interpreter ──────────────────────────────────────────────────────────
     if (this.graph.strokes.length) {
       this.graph.hypotheses = this.m.interpreter.update(
         this.graph.strokes, voice, { graph: this.graph, poseStates: poses }
       );
     }
 
-    // ── Assemble scene ──────────────────────────────────────────────────────
-    const mesh = this.m.geometryEngine.assemble(this.graph);
+    // ── Satisfaction signal ─────────────────────────────────────────────────
+    const satState = this.m.satisfactionSignal.update(this.uiEvents.splice(0));
+    this.onSatisfaction?.(satState);
 
-    const topH = this.graph.hypotheses[0];
+    // ── Assemble scene ──────────────────────────────────────────────────────
+    const mesh  = this.m.geometryEngine.assemble(this.graph);
+    const topH  = this.graph.hypotheses[0];
 
     const scene: AppScene = {
       parts:        mesh ? [mesh] : [],
       previewMesh:  topH?.previewMesh ?? null,
       strokes:      this.strokes,
       activeStroke: this.strokeActive && this.activePoints.length >= 2
-        ? this.activePoints.map(p => {
-            // Convert normalised → scene coords (matches ScreenPlaneMapping)
-            return { x: (0.5 - p.x) * 4.0, y: (0.5 - p.y) * 3.0 };
-          })
+        ? this.activePoints.map(p => ({ x: (0.5 - p.x) * 4.0, y: (0.5 - p.y) * 3.0 }))
         : undefined,
     };
 
     // ── Nav sphere state ────────────────────────────────────────────────────
-    const ndPinch = nonDominant?.pinch ?? 0;
-    const sphereState =
-      ndPinch > 0.7  ? 'highlight' as const :
-      ndPinch > 0.3  ? 'highlight' as const : 'idle' as const;
+    const ndPinch   = nonDominant?.pinch ?? 0;
+    const sphereState = ndPinch > 0.3 ? 'highlight' as const : 'idle' as const;
 
     const fb: FeedbackState = {
       navSphere: { visible: true, state: sphereState },
@@ -172,7 +209,7 @@ export class MADEApp {
 
     this.m.renderer.render(scene, fb);
 
-    // ── Status update ────────────────────────────────────────────────────────
+    // ── Status ──────────────────────────────────────────────────────────────
     if (this.onStatus) {
       const hCount = hands.length;
       if (hCount === 0) {
@@ -180,7 +217,7 @@ export class MADEApp {
       } else if (this.strokeActive) {
         this.onStatus(`Drawing stroke (${this.activePoints.length} pts)`);
       } else if (topH) {
-        this.onStatus(`Hypothesis: ${topH.concept} (${(topH.score * 100).toFixed(0)}%)`);
+        this.onStatus(`${topH.concept}  ${(topH.score * 100).toFixed(0)}%  — Lock or draw more`);
       } else {
         this.onStatus(`${hCount} hand${hCount > 1 ? 's' : ''} · ${this.strokes.length} stroke${this.strokes.length !== 1 ? 's' : ''}`);
       }
@@ -191,7 +228,6 @@ export class MADEApp {
     switch (edit.type) {
       case 'add-node':
         if (edit.data) {
-          // Build a minimal PartNode from the edit data
           const id = edit.nodeId ?? `node-${Date.now()}`;
           this.graph.nodes.push({
             id,
