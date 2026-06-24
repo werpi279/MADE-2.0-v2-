@@ -25,39 +25,32 @@ export class ThreeRenderer implements Renderer {
   private idleRotY = 0;
 
   constructor() {
-    // Pre-flight: check whether the browser can vend a WebGL context at all,
-    // bypassing the "major performance caveat" gate (software/Mesa fallback OK).
-    // This is the key flag Firefox needs when hardware-accel drivers are blocked.
-    const probe = document.createElement('canvas');
-    const probeCtx =
-      probe.getContext('webgl2', { failIfMajorPerformanceCaveat: false }) ??
-      probe.getContext('webgl',  { failIfMajorPerformanceCaveat: false });
-    if (!probeCtx) {
-      throw new Error(
-        'WebGL is unavailable in this browser. ' +
-        'Firefox: open about:config and set both webgl.force-enabled = true ' +
-        'and webgl.disabled = false, then reload.',
-      );
-    }
-    // Lose the probe context so it doesn't count against Firefox's context cap.
-    const ext = probeCtx.getExtension('WEBGL_lose_context');
-    ext?.loseContext();
-
-    // Try progressively simpler configurations.
-    // failIfMajorPerformanceCaveat:false allows the software/Mesa renderer —
-    // critical on systems where the GPU driver is on the ANGLE blocklist.
+    // Try progressively simpler/more-permissive WebGL configurations.
+    // failIfMajorPerformanceCaveat:false allows software/Mesa fallback.
+    // alpha:false eliminates one EGL surface requirement that can fail on
+    // Intel + ANGLE/EGL.  precision:'mediump' reduces shader complexity.
     const configs: THREE.WebGLRendererParameters[] = [
       { antialias: true,  failIfMajorPerformanceCaveat: false },
       { antialias: false, failIfMajorPerformanceCaveat: false },
-      { antialias: false, failIfMajorPerformanceCaveat: false, powerPreference: 'low-power' },
-      { antialias: false, failIfMajorPerformanceCaveat: false, powerPreference: 'low-power', precision: 'mediump' },
+      { antialias: false, failIfMajorPerformanceCaveat: false, alpha: false },
+      { antialias: false, failIfMajorPerformanceCaveat: false, alpha: false, powerPreference: 'low-power' },
+      { antialias: false, failIfMajorPerformanceCaveat: false, alpha: false, powerPreference: 'low-power', precision: 'mediump' },
+      { antialias: false, failIfMajorPerformanceCaveat: false, alpha: false, depth: false, stencil: false, precision: 'lowp' },
     ];
+
     let renderer: THREE.WebGLRenderer | null = null;
     for (const cfg of configs) {
       try { renderer = new THREE.WebGLRenderer(cfg); break; } catch { /* try next */ }
     }
+
     if (!renderer) {
-      throw new Error('WebGL renderer could not be initialised. Check browser console for details.');
+      // FEATURE_FAILURE_EGL_POT / FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS:
+      // Firefox's ANGLE EGL backend failed on every attempt.
+      // Throwing here lets main.ts surface the fix instructions.
+      throw Object.assign(
+        new Error('WEBGL_UNAVAILABLE'),
+        { isWebGLUnavailable: true },
+      );
     }
     this.webgl = renderer;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
