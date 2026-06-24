@@ -7,8 +7,6 @@ const video     = document.createElement('video');
 video.style.display = 'none';
 document.body.appendChild(video);
 
-const app = new MADEApp(container);
-
 // ── Status overlay ──────────────────────────────────────────────────────────
 const overlay = document.createElement('div');
 overlay.id = 'status';
@@ -17,15 +15,8 @@ document.body.appendChild(overlay);
 function setStatus(msg: string): void {
   overlay.textContent = msg;
 }
-app.onStatus = setStatus;
 
-// ── Satisfaction-signal → auto-reveal force-input ───────────────────────────
-app.onSatisfaction = (state) => {
-  const wrap = document.getElementById('force-wrap');
-  if (wrap) wrap.style.display = state.showForceInput ? 'flex' : 'none';
-};
-
-// ── Lock / Reject / Force-input buttons ─────────────────────────────────────
+// ── Lock / Reject / Force-input / Export buttons ────────────────────────────
 const controls = document.createElement('div');
 controls.id = 'controls';
 controls.innerHTML = `
@@ -42,16 +33,17 @@ controls.innerHTML = `
 `;
 document.body.appendChild(controls);
 
-const btnLock   = document.getElementById('btn-lock')!;
-const btnReject = document.getElementById('btn-reject')!;
 const forceInput = document.getElementById('force-input') as HTMLInputElement;
-const btnForce  = document.getElementById('btn-force')!;
 
-btnLock.addEventListener('click', () => app.lockTop());
-btnReject.addEventListener('click', () => app.reject());
-btnForce.addEventListener('click', () => {
+// app is null until the user clicks Start (WebGL context created inside the
+// click handler so Firefox's EGL/ANGLE init happens after a user gesture).
+let app: MADEApp | null = null;
+
+document.getElementById('btn-lock')!.addEventListener('click', () => app?.lockTop());
+document.getElementById('btn-reject')!.addEventListener('click', () => app?.reject());
+document.getElementById('btn-force')!.addEventListener('click', () => {
   const label = forceInput.value.trim();
-  if (label) { void app.forceConcept(label); forceInput.value = ''; }
+  if (label && app) { void app.forceConcept(label); forceInput.value = ''; }
 });
 
 function _downloadBlob(blob: Blob, name: string): void {
@@ -64,68 +56,86 @@ function _downloadBlob(blob: Blob, name: string): void {
 }
 
 document.getElementById('btn-export-obj')!.addEventListener('click', async () => {
+  if (!app) return;
   try {
     setStatus('Exporting OBJ…');
-    const blob = await app.export('obj');
-    _downloadBlob(blob, 'model.obj');
+    _downloadBlob(await app.export('obj'), 'model.obj');
     setStatus('OBJ exported');
   } catch (e) { setStatus(`Export error: ${(e as Error).message}`); }
 });
 
 document.getElementById('btn-export-glb')!.addEventListener('click', async () => {
+  if (!app) return;
   try {
     setStatus('Exporting GLB…');
-    const blob = await app.export('glb');
-    _downloadBlob(blob, 'model.glb');
+    _downloadBlob(await app.export('glb'), 'model.glb');
     setStatus('GLB exported');
   } catch (e) { setStatus(`Export error: ${(e as Error).message}`); }
 });
 
 document.addEventListener('keydown', e => {
   if (e.target === forceInput) return;
-  if (e.key === 'Enter') app.lockTop();
-  if (e.key === 'Escape') app.reject();
+  if (e.key === 'Enter') app?.lockTop();
+  if (e.key === 'Escape') app?.reject();
 });
 
-// ── Tauri: first-run weight-download notification ────────────────────────────
-if (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined') {
-  import('@tauri-apps/api/event').then(({ listen }) => {
-    listen<void>('weights-missing', () => {
-      setStatus('First run: TripoSR weights missing — click to download (~1 GB)');
-      overlay.style.cursor = 'pointer';
-      overlay.onclick = async () => {
-        setStatus('Downloading TripoSR weights…');
-        overlay.style.cursor = '';
-        overlay.onclick = null;
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('download_weights').catch((e: unknown) =>
-          setStatus(`Download error: ${(e as Error).message}`),
-        );
-      };
-    });
-  });
-}
-
-// ── Start button (getUserMedia requires user gesture) ────────────────────────
-const startBtn = document.createElement('div');
-startBtn.id = 'start-screen';
-startBtn.innerHTML = `
+// ── Start screen ─────────────────────────────────────────────────────────────
+const startScreen = document.createElement('div');
+startScreen.id = 'start-screen';
+startScreen.innerHTML = `
   <div class="start-logo">MADE</div>
   <div class="start-sub">Manual Approach in Digital Environment</div>
   <button id="start-btn">Start — allow camera</button>
   <div class="start-note">Webcam used locally · no data leaves your browser</div>
 `;
-document.body.appendChild(startBtn);
+document.body.appendChild(startScreen);
 
 document.getElementById('start-btn')!.addEventListener('click', async () => {
-  startBtn.remove();
+  startScreen.remove();
   setStatus('Requesting camera…');
+
   try {
     await startCapture(video);
   } catch (err) {
     setStatus(`Camera error: ${(err as Error).message}`);
     return;
   }
+
+  // Create MADEApp (and WebGL context) here, after user gesture + camera grant.
+  // Firefox requires a user gesture for reliable WebGL context creation.
+  setStatus('Initialising renderer…');
+  try {
+    app = new MADEApp(container);
+  } catch (err) {
+    setStatus(`Renderer error: ${(err as Error).message} — try enabling hardware acceleration`);
+    return;
+  }
+
+  app.onStatus = setStatus;
+  app.onSatisfaction = (state) => {
+    const wrap = document.getElementById('force-wrap');
+    if (wrap) wrap.style.display = state.showForceInput ? 'flex' : 'none';
+  };
+
+  // Tauri: first-run weight-download notification
+  if (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined') {
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen<void>('weights-missing', () => {
+        setStatus('First run: TripoSR weights missing — click to download (~1 GB)');
+        overlay.style.cursor = 'pointer';
+        overlay.onclick = async () => {
+          setStatus('Downloading TripoSR weights…');
+          overlay.style.cursor = '';
+          overlay.onclick = null;
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('download_weights').catch((e: unknown) =>
+            setStatus(`Download error: ${(e as Error).message}`),
+          );
+        };
+      });
+    });
+  }
+
   app.setVideo(video);
   setStatus('Loading MediaPipe hand tracking…');
   try {
@@ -134,6 +144,7 @@ document.getElementById('start-btn')!.addEventListener('click', async () => {
     setStatus(`Model load error: ${(err as Error).message}`);
     return;
   }
+
   app.start();
   setStatus('Show your hands — pinch to draw');
 });

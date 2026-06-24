@@ -25,7 +25,24 @@ export class ThreeRenderer implements Renderer {
   private idleRotY = 0;
 
   constructor() {
-    this.webgl = new THREE.WebGLRenderer({ antialias: true });
+    // Try progressively simpler configurations; Firefox/ANGLE can reject the first
+    const configs: THREE.WebGLRendererParameters[] = [
+      { antialias: true },
+      { antialias: false },
+      { antialias: false, powerPreference: 'low-power' },
+      { antialias: false, powerPreference: 'low-power', precision: 'mediump' },
+    ];
+    let renderer: THREE.WebGLRenderer | null = null;
+    for (const cfg of configs) {
+      try { renderer = new THREE.WebGLRenderer(cfg); break; } catch { /* try next */ }
+    }
+    if (!renderer) {
+      throw new Error(
+        'WebGL context unavailable — enable hardware acceleration in your browser settings ' +
+        '(Firefox: about:config → webgl.force-enabled = true)',
+      );
+    }
+    this.webgl = renderer;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.scene = new THREE.Scene();
