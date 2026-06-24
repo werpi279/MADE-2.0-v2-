@@ -34,6 +34,7 @@ html, body {
 #controls button:hover { background: rgba(60,60,120,.9); }
 
 #force-wrap { display: none; gap: 6px; }
+#export-wrap { display: flex; gap: 6px; }
 
 #force-input {
   background: rgba(20,20,50,.9); border: 1px solid #4455aa;

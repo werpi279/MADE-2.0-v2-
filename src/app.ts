@@ -26,11 +26,20 @@ export class MADEApp {
   onStatus?:       (msg: string) => void;
   onSatisfaction?: (state: SatisfactionState) => void;
 
+  // V7: brief visual highlight of the freshly locked node
+  private highlightUntil = 0;
+
   constructor(container: HTMLElement) {
     this.m     = createModules();
     this.graph  = this.m.store.load();
     this.m.renderer.mount(container);
     this.m.speech.onEvent(e => this.pendingVoice.push(e));
+
+    // Inject mesh provider so LocalStore.export() can resolve the current scene
+    const store = this.m.store as import('./modules/store/local-store').LocalStore;
+    if ('setMeshProvider' in store) {
+      store.setMeshProvider(() => this.m.geometryEngine.assemble(this.graph));
+    }
   }
 
   setVideo(video: HTMLVideoElement): void { this.video = video; }
@@ -61,6 +70,7 @@ export class MADEApp {
     this.graph.strokes = [];
     this.strokes = [];
     this.uiEvents.push({ kind: 'lock', nodeId: edit.nodeId, timestamp: Date.now() });
+    this.highlightUntil = Date.now() + 1500;
     this.m.store.save(this.graph);
   }
 
@@ -121,6 +131,11 @@ export class MADEApp {
   getTopHypothesis() { return this.graph.hypotheses[0] ?? null; }
   getGraph() { return this.graph; }
 
+  /** Export the current scene as OBJ or GLB. */
+  async export(fmt: 'obj' | 'glb'): Promise<Blob> {
+    return this.m.store.export(fmt);
+  }
+
   private readonly loop = (timestamp: number): void => {
     if (!this.running) return;
     requestAnimationFrame(this.loop);
@@ -156,6 +171,7 @@ export class MADEApp {
         );
         this.strokes.push(stroke);
         this.graph.strokes = [...this.strokes];
+        this.m.store.save(this.graph);  // autosave on each committed stroke
       }
       this.strokeActive = false;
       this.activePoints = [];
@@ -199,11 +215,13 @@ export class MADEApp {
         : undefined,
     };
 
-    // ── Nav sphere state ────────────────────────────────────────────────────
+    // ── Nav sphere + feedback state ─────────────────────────────────────────
     const ndPinch   = nonDominant?.pinch ?? 0;
     const sphereState = ndPinch > 0.3 ? 'highlight' as const : 'idle' as const;
+    const lastNode  = this.graph.nodes[this.graph.nodes.length - 1];
 
     const fb: FeedbackState = {
+      highlightedNode: lastNode && Date.now() < this.highlightUntil ? lastNode.id : undefined,
       navSphere: { visible: true, state: sphereState },
     };
 

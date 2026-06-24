@@ -35,6 +35,10 @@ controls.innerHTML = `
     <input id="force-input" type="text" placeholder="Name this shape…" autocomplete="off" />
     <button id="btn-force">Force</button>
   </div>
+  <div id="export-wrap">
+    <button id="btn-export-obj" title="Export as OBJ">Save OBJ</button>
+    <button id="btn-export-glb" title="Export as GLB">Save GLB</button>
+  </div>
 `;
 document.body.appendChild(controls);
 
@@ -47,7 +51,34 @@ btnLock.addEventListener('click', () => app.lockTop());
 btnReject.addEventListener('click', () => app.reject());
 btnForce.addEventListener('click', () => {
   const label = forceInput.value.trim();
-  if (label) { app.forceConcept(label); forceInput.value = ''; }
+  if (label) { void app.forceConcept(label); forceInput.value = ''; }
+});
+
+function _downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btn-export-obj')!.addEventListener('click', async () => {
+  try {
+    setStatus('Exporting OBJ…');
+    const blob = await app.export('obj');
+    _downloadBlob(blob, 'model.obj');
+    setStatus('OBJ exported');
+  } catch (e) { setStatus(`Export error: ${(e as Error).message}`); }
+});
+
+document.getElementById('btn-export-glb')!.addEventListener('click', async () => {
+  try {
+    setStatus('Exporting GLB…');
+    const blob = await app.export('glb');
+    _downloadBlob(blob, 'model.glb');
+    setStatus('GLB exported');
+  } catch (e) { setStatus(`Export error: ${(e as Error).message}`); }
 });
 
 document.addEventListener('keydown', e => {

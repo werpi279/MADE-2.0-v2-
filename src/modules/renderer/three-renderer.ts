@@ -88,6 +88,16 @@ export class ThreeRenderer implements Renderer {
       this.workpiece.rotation.x = 0.2;
     }
 
+    // ── Node highlight (emissive glow on newly locked node) ───────────────
+    const highlight = !!fb.highlightedNode;
+    for (const m of this.activeParts) {
+      if (m instanceof THREE.Mesh) {
+        const mat = m.material as THREE.MeshStandardMaterial;
+        mat.emissive?.setHex(highlight ? 0x88ff88 : 0x000000);
+        mat.emissiveIntensity = highlight ? 0.35 : 0;
+      }
+    }
+
     // ── Nav sphere ────────────────────────────────────────────────────────
     this.navSphere.object.visible = fb.navSphere.visible;
     if (fb.navSphere.visible) {
