@@ -7,10 +7,9 @@ export class MADEApp {
   private readonly m: Modules;
   private graph: IntentGraph;
   private running = false;
-  private rotY = 0;
 
   constructor(container: HTMLElement) {
-    this.m = createModules();
+    this.m    = createModules();
     this.graph = this.m.store.load();
     this.m.renderer.mount(container);
   }
@@ -32,27 +31,21 @@ export class MADEApp {
   };
 
   private tick(): void {
-    // V2+: handTracking.track() -> gestureRecognizer.recognize() -> spatialMapping.mapStroke()
-    // V3+: interpreter.update() fills graph.hypotheses; lock/reject commits to graph.nodes
-    // V0: drive the placeholder mesh directly to confirm the pipeline is wired
+    // V2+: handTracking.track() → gestureRecognizer.recognize() → spatialMapping.mapStroke()
+    //       → interpreter.update() fills graph.hypotheses; lock/reject commits to graph.nodes
+    // V0/V1: assemble shows placeholder; renderer drives idle rotation.
 
     const mesh = this.m.geometryEngine.assemble(this.graph);
 
-    // Rotate the placeholder so V0 is visually alive
-    if (mesh) {
-      this.rotY += 0.005;
-      mesh.rotation.y = this.rotY;
-      mesh.rotation.x = 0.25;
-    }
-
     const scene: AppScene = {
-      parts: mesh ? [mesh] : [],
-      previewMesh: null,
+      parts:             mesh ? [mesh] : [],
+      previewMesh:       null,
+      // no workpieceTransform → renderer uses idle rotation until V2
     };
 
     const fb: FeedbackState = {
-      showNavSphere: false,
-      navSphereOpacity: 0,
+      navSphere: { visible: true, state: 'idle' },
+      // influenceBlob and bubbleViz absent → hidden
     };
 
     this.m.renderer.render(scene, fb);

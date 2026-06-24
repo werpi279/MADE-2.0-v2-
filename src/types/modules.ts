@@ -63,13 +63,18 @@ export interface SculptOp {
 export interface AppScene {
   parts: Mesh[];
   previewMesh: Mesh | null;
+  /** Drives the renderer's workpiece Group. Omit to let the renderer use idle rotation. */
+  workpieceTransform?: import('./intent-graph').Transform;
 }
 
 export interface FeedbackState {
   highlightedNode?: NodeId;
+  /** Show translucent blob at this workpiece-local position with given falloff radius. */
   influenceBlob?: { position: [number, number, number]; radius: number };
-  showNavSphere: boolean;
-  navSphereOpacity: number;
+  /** Show bubble region sphere in workpiece-local space. */
+  bubbleViz?: { center: [number, number, number]; radius: number; state: 'active' | 'cage' | 'mask' };
+  /** Navigation sphere visual state. */
+  navSphere: { visible: boolean; state: 'idle' | 'highlight' | 'ghost' };
 }
 
 export interface UiEvent {
