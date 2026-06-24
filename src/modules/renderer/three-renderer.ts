@@ -25,22 +25,39 @@ export class ThreeRenderer implements Renderer {
   private idleRotY = 0;
 
   constructor() {
-    // Try progressively simpler configurations; Firefox/ANGLE can reject the first
+    // Pre-flight: check whether the browser can vend a WebGL context at all,
+    // bypassing the "major performance caveat" gate (software/Mesa fallback OK).
+    // This is the key flag Firefox needs when hardware-accel drivers are blocked.
+    const probe = document.createElement('canvas');
+    const probeCtx =
+      probe.getContext('webgl2', { failIfMajorPerformanceCaveat: false }) ??
+      probe.getContext('webgl',  { failIfMajorPerformanceCaveat: false });
+    if (!probeCtx) {
+      throw new Error(
+        'WebGL is unavailable in this browser. ' +
+        'Firefox: open about:config and set both webgl.force-enabled = true ' +
+        'and webgl.disabled = false, then reload.',
+      );
+    }
+    // Lose the probe context so it doesn't count against Firefox's context cap.
+    const ext = probeCtx.getExtension('WEBGL_lose_context');
+    ext?.loseContext();
+
+    // Try progressively simpler configurations.
+    // failIfMajorPerformanceCaveat:false allows the software/Mesa renderer —
+    // critical on systems where the GPU driver is on the ANGLE blocklist.
     const configs: THREE.WebGLRendererParameters[] = [
-      { antialias: true },
-      { antialias: false },
-      { antialias: false, powerPreference: 'low-power' },
-      { antialias: false, powerPreference: 'low-power', precision: 'mediump' },
+      { antialias: true,  failIfMajorPerformanceCaveat: false },
+      { antialias: false, failIfMajorPerformanceCaveat: false },
+      { antialias: false, failIfMajorPerformanceCaveat: false, powerPreference: 'low-power' },
+      { antialias: false, failIfMajorPerformanceCaveat: false, powerPreference: 'low-power', precision: 'mediump' },
     ];
     let renderer: THREE.WebGLRenderer | null = null;
     for (const cfg of configs) {
       try { renderer = new THREE.WebGLRenderer(cfg); break; } catch { /* try next */ }
     }
     if (!renderer) {
-      throw new Error(
-        'WebGL context unavailable — enable hardware acceleration in your browser settings ' +
-        '(Firefox: about:config → webgl.force-enabled = true)',
-      );
+      throw new Error('WebGL renderer could not be initialised. Check browser console for details.');
     }
     this.webgl = renderer;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
