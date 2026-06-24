@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import type { Renderer, AppScene, FeedbackState } from '../../types/modules';
+import type { Stroke } from '../../types/intent-graph';
+import type { Pt2D } from '../../types/intent-graph';
 import { NavSphere } from './nav-sphere';
 import { InfluenceBlob } from './influence-blob';
 import { BubbleViz } from './bubble-viz';
+
+const STROKE_MAT_COMMITTED = new THREE.LineBasicMaterial({ color: 0x5566aa, linewidth: 2 });
+const STROKE_MAT_ACTIVE    = new THREE.LineBasicMaterial({ color: 0xaabbff, linewidth: 3 });
 
 // V7: add highlights, ghost preview, magnitude readouts.
 // V1: workpiece group, nav sphere, influence blob, bubble viz, hemisphere lighting.
@@ -16,7 +21,8 @@ export class ThreeRenderer implements Renderer {
   private readonly bubbleViz: BubbleViz;
   private container: HTMLElement | null = null;
   private activeParts: THREE.Mesh[] = [];
-  private idleRotY = 0;  // slow idle rotation while no gesture navigation is active
+  private strokeLines: THREE.Line[] = [];
+  private idleRotY = 0;
 
   constructor() {
     this.webgl = new THREE.WebGLRenderer({ antialias: true });
@@ -104,6 +110,34 @@ export class ThreeRenderer implements Renderer {
       );
     } else {
       this.bubbleViz.hide();
+    }
+
+    // ── Strokes ───────────────────────────────────────────────────────────
+    for (const l of this.strokeLines) { this.workpiece.remove(l); l.geometry.dispose(); }
+    this.strokeLines = [];
+
+    const toLines = (pts: Pt2D[], mat: THREE.LineBasicMaterial): THREE.Line => {
+      const v3 = pts.map(p => new THREE.Vector3(p.x, p.y, 0));
+      const geo = new THREE.BufferGeometry().setFromPoints(v3);
+      const line = new THREE.Line(geo, mat);
+      this.workpiece.add(line);
+      this.strokeLines.push(line);
+      return line;
+    };
+
+    if (appScene.strokes) {
+      for (const s of appScene.strokes) {
+        if (s.points2D.length >= 2) {
+          // Apply plane orientation: rotate the flat stroke into the draw plane
+          const q = new THREE.Quaternion(s.planeOrientation.x, s.planeOrientation.y,
+                                         s.planeOrientation.z, s.planeOrientation.w);
+          const line = toLines(s.points2D, STROKE_MAT_COMMITTED);
+          line.quaternion.copy(q);
+        }
+      }
+    }
+    if (appScene.activeStroke && appScene.activeStroke.length >= 2) {
+      toLines(appScene.activeStroke.map(p => p), STROKE_MAT_ACTIVE);
     }
 
     this.webgl.render(this.scene, this.camera);

@@ -1,32 +1,83 @@
 import './style.css';
 import { MADEApp } from './app';
+import { startCapture } from './capture/capture';
 
-const container = document.getElementById('app');
-if (!container) throw new Error('Missing #app element');
+const container = document.getElementById('app')!;
+const video     = document.createElement('video');
+video.style.display = 'none';
+document.body.appendChild(video);
 
 const app = new MADEApp(container);
-app.start();
 
-// V0 status overlay — shows each module and its current implementation tier
+// ── Status overlay ──────────────────────────────────────────────────────────
 const overlay = document.createElement('div');
 overlay.id = 'status';
-overlay.innerHTML = `
-  <div class="status-title">MADE v2 — V0 Skeleton</div>
-  <table>
-    <tbody>
-      <tr><td>HandTracking</td><td class="stub">mediapipe [stub → V2]</td></tr>
-      <tr><td>GestureRecognizer</td><td class="stub">rules [stub → V2]</td></tr>
-      <tr><td>SpatialMapping</td><td class="stub">screen-plane [stub → V2]</td></tr>
-      <tr><td>Speech</td><td class="stub">webspeech [stub → V4]</td></tr>
-      <tr><td>ShapeRecognizer</td><td class="stub">clip [stub → V4]</td></tr>
-      <tr><td>Interpreter</td><td class="stub">hypothesis-engine [stub → V3]</td></tr>
-      <tr><td>FormProvider</td><td class="stub">template→generation→retrieval [stub → V5]</td></tr>
-      <tr><td>GenerationBackend</td><td class="stub">local-sidecar/TripoSR [stub → V6]</td></tr>
-      <tr><td>GeometryEngine</td><td class="stub">mesh-engine [placeholder → V1]</td></tr>
-      <tr><td>Renderer</td><td class="live">three-renderer [live]</td></tr>
-      <tr><td>SatisfactionSignal</td><td class="stub">behavioral [stub → V5]</td></tr>
-      <tr><td>Store</td><td class="stub">local [localStorage → V7]</td></tr>
-    </tbody>
-  </table>
-`;
 document.body.appendChild(overlay);
+
+function setStatus(msg: string): void {
+  overlay.textContent = msg;
+}
+app.onStatus = setStatus;
+
+// ── Lock / Reject / Force-input buttons ─────────────────────────────────────
+const controls = document.createElement('div');
+controls.id = 'controls';
+controls.innerHTML = `
+  <button id="btn-lock" title="Lock hypothesis (Enter)">Lock ✓</button>
+  <button id="btn-reject" title="Reject / clear strokes (Esc)">Reject ✗</button>
+  <div id="force-wrap">
+    <input id="force-input" type="text" placeholder="Name this shape…" autocomplete="off" />
+    <button id="btn-force">Force</button>
+  </div>
+`;
+document.body.appendChild(controls);
+
+const btnLock   = document.getElementById('btn-lock')!;
+const btnReject = document.getElementById('btn-reject')!;
+const forceInput = document.getElementById('force-input') as HTMLInputElement;
+const btnForce  = document.getElementById('btn-force')!;
+
+btnLock.addEventListener('click', () => app.lockTop());
+btnReject.addEventListener('click', () => app.reject());
+btnForce.addEventListener('click', () => {
+  const label = forceInput.value.trim();
+  if (label) { app.forceConcept(label); forceInput.value = ''; }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.target === forceInput) return;
+  if (e.key === 'Enter') app.lockTop();
+  if (e.key === 'Escape') app.reject();
+});
+
+// ── Start button (getUserMedia requires user gesture) ────────────────────────
+const startBtn = document.createElement('div');
+startBtn.id = 'start-screen';
+startBtn.innerHTML = `
+  <div class="start-logo">MADE</div>
+  <div class="start-sub">Manual Approach in Digital Environment</div>
+  <button id="start-btn">Start — allow camera</button>
+  <div class="start-note">Webcam used locally · no data leaves your browser</div>
+`;
+document.body.appendChild(startBtn);
+
+document.getElementById('start-btn')!.addEventListener('click', async () => {
+  startBtn.remove();
+  setStatus('Requesting camera…');
+  try {
+    await startCapture(video);
+  } catch (err) {
+    setStatus(`Camera error: ${(err as Error).message}`);
+    return;
+  }
+  app.setVideo(video);
+  setStatus('Loading MediaPipe hand tracking…');
+  try {
+    await app.setup();
+  } catch (err) {
+    setStatus(`Model load error: ${(err as Error).message}`);
+    return;
+  }
+  app.start();
+  setStatus('Show your hands — pinch to draw');
+});

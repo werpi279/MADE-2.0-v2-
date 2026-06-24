@@ -1,20 +1,27 @@
-import type { Mesh, Stroke, IntentGraph, Hypothesis, Pt2D, Quat, PartNode } from './intent-graph';
+import type { Mesh, Stroke, IntentGraph, Hypothesis, Pt2D, Quat, PartNode, Transform } from './intent-graph';
 
 // --- Supporting value types ---
 
 export type HandLandmark = { x: number; y: number; z: number };
-export type HandFrame = HandLandmark[][];  // [hand_index][landmark_index]
+
+/** One detected hand: 21 landmarks + MediaPipe handedness label. */
+export interface DetectedHand {
+  landmarks: HandLandmark[];   // 21 points, normalised [0,1]
+  handedness: 'Left' | 'Right';
+}
 
 export interface PoseState {
-  pinch: number;       // 0–1 dominant hand pinch strength
-  openness: number;    // 0–1 hand openness
-  cup: number;         // 0–1 cupped-palm strength
-  grip: boolean;
-  framePose: boolean;
-  toss: boolean;
-  wristRoll: number;   // radians
-  penDown: boolean;    // dominant hand engaged (pinch threshold crossed)
+  pinch: number;        // 0–1 pinch strength (thumb+index proximity)
+  openness: number;     // 0–1 hand openness (average finger extension)
+  cup: number;          // 0–1 cupped-palm strength
+  grip: boolean;        // all fingers tightly curled
+  framePose: boolean;   // L-shape: thumb + index extended, rest curled
+  toss: boolean;        // quick upward flick (needs temporal tracking; stub=false)
+  wristRoll: number;    // radians — angle of wrist→index-MCP vector
+  penDown: boolean;     // pinch crossed engagement threshold
   hand: 'left' | 'right' | null;
+  indexTipNorm: Pt2D | null;    // normalised [0,1] screen pos of index tip
+  palmCenterNorm: Pt2D | null;  // normalised palm centroid
 }
 
 export interface VoiceEvent {
@@ -31,7 +38,7 @@ export interface ConceptScore {
 
 export interface Context {
   graph: IntentGraph;
-  poseState: PoseState;
+  poseStates: PoseState[];  // one per detected hand
 }
 
 export interface GraphEdit {
@@ -63,17 +70,15 @@ export interface SculptOp {
 export interface AppScene {
   parts: Mesh[];
   previewMesh: Mesh | null;
-  /** Drives the renderer's workpiece Group. Omit to let the renderer use idle rotation. */
-  workpieceTransform?: import('./intent-graph').Transform;
+  strokes?: Stroke[];         // committed strokes (rendered as lines)
+  activeStroke?: Pt2D[];      // in-progress stroke (bright highlight)
+  workpieceTransform?: Transform;
 }
 
 export interface FeedbackState {
   highlightedNode?: NodeId;
-  /** Show translucent blob at this workpiece-local position with given falloff radius. */
   influenceBlob?: { position: [number, number, number]; radius: number };
-  /** Show bubble region sphere in workpiece-local space. */
   bubbleViz?: { center: [number, number, number]; radius: number; state: 'active' | 'cage' | 'mask' };
-  /** Navigation sphere visual state. */
   navSphere: { visible: boolean; state: 'idle' | 'highlight' | 'ghost' };
 }
 
@@ -84,23 +89,25 @@ export interface UiEvent {
 }
 
 export interface SatisfactionState {
-  score: number;                   // 0–1
+  score: number;
   frustrated: boolean;
   recognizerConfidenceLow: boolean;
   showForceInput: boolean;
-  priors: Record<string, number>;  // concept -> weight boost, in-session only
+  priors: Record<string, number>;
 }
 
 // --- Module interfaces (the fixed spine contracts) ---
-// Swap = provide another implementation of the same interface in config.ts.
-// NEVER change these signatures — that would be changing the spine.
 
 export interface HandTracking {
-  track(frame: VideoFrame): HandFrame[];
+  /** Optional async init — called once before the main loop starts. */
+  setup?(): Promise<void>;
+  /** Returns 0–2 detected hands for the current video frame. */
+  track(video: HTMLVideoElement, timestamp: number): DetectedHand[];
 }
 
 export interface GestureRecognizer {
-  recognize(hands: HandFrame[]): PoseState;
+  /** Returns one PoseState per detected hand, same indexing as input. */
+  recognize(hands: DetectedHand[]): PoseState[];
 }
 
 export interface SpatialMapping {
@@ -147,5 +154,5 @@ export interface SatisfactionSignal {
 export interface Store {
   save(graph: IntentGraph): void;
   load(): IntentGraph;
-  export(fmt: 'obj' | 'glb'): Blob;
+  export(fmt: 'obj' | 'glb'): Promise<Blob>;
 }

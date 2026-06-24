@@ -1,59 +1,70 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
-  width: 100%;
-  height: 100%;
+  width: 100%; height: 100%;
   overflow: hidden;
   background: #1a1a2e;
   font-family: 'Courier New', monospace;
   color: #e0e0e0;
 }
 
-#app {
-  width: 100vw;
-  height: 100vh;
-}
+#app { width: 100vw; height: 100vh; }
+#app canvas { display: block; width: 100% !important; height: 100% !important; }
 
-#app canvas {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-}
-
+/* ── Status bar ─────────────────────────────────────────────── */
 #status {
-  position: fixed;
-  top: 12px;
-  left: 12px;
-  background: rgba(0, 0, 0, 0.7);
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 11px;
-  pointer-events: none;
-  z-index: 100;
-  max-width: 420px;
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.65); border: 1px solid #333; border-radius: 20px;
+  padding: 5px 18px; font-size: 12px; color: #aabbff;
+  pointer-events: none; z-index: 100; white-space: nowrap;
 }
 
-.status-title {
-  font-size: 12px;
-  font-weight: bold;
-  color: #4a90d9;
-  margin-bottom: 8px;
-  letter-spacing: 0.05em;
+/* ── Lock / Reject / Force controls ────────────────────────── */
+#controls {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 10px; align-items: center; z-index: 100;
 }
 
-#status table { border-collapse: collapse; width: 100%; }
+#controls button {
+  background: rgba(30,30,60,.85); border: 1px solid #4455aa;
+  color: #aabbff; font-family: inherit; font-size: 13px;
+  padding: 7px 18px; border-radius: 8px; cursor: pointer;
+  transition: background .15s;
+}
+#controls button:hover { background: rgba(60,60,120,.9); }
 
-#status td {
-  padding: 2px 8px 2px 0;
-  vertical-align: top;
+#force-wrap { display: flex; gap: 6px; }
+
+#force-input {
+  background: rgba(20,20,50,.9); border: 1px solid #4455aa;
+  color: #e0e0e0; font-family: inherit; font-size: 13px;
+  padding: 6px 12px; border-radius: 8px; width: 180px; outline: none;
+}
+#force-input:focus { border-color: #88aaff; }
+
+/* ── Start screen ───────────────────────────────────────────── */
+#start-screen {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #1a1a2e; gap: 14px; z-index: 200;
 }
 
-#status td:first-child {
-  color: #aaa;
-  white-space: nowrap;
-  padding-right: 12px;
+.start-logo {
+  font-size: 72px; font-weight: bold; color: #4a90d9;
+  letter-spacing: .12em;
 }
 
-.stub { color: #f0a030; }
-.live { color: #50c878; }
+.start-sub {
+  font-size: 14px; color: #7788bb; letter-spacing: .06em;
+  margin-bottom: 12px;
+}
+
+#start-btn {
+  background: #4a90d9; border: none; color: #fff;
+  font-family: inherit; font-size: 16px; font-weight: bold;
+  padding: 14px 40px; border-radius: 12px; cursor: pointer;
+  transition: background .15s;
+}
+#start-btn:hover { background: #5aa8f0; }
+
+.start-note { font-size: 11px; color: #445566; }

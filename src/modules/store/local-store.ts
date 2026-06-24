@@ -24,7 +24,7 @@ export class LocalStore implements Store {
     return emptyGraph();
   }
 
-  export(_fmt: 'obj' | 'glb'): Blob {
+  async export(_fmt: 'obj' | 'glb'): Promise<Blob> {
     throw new Error('Store.export: not implemented until V7');
   }
 }
