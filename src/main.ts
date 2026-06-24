@@ -56,6 +56,25 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') app.reject();
 });
 
+// ── Tauri: first-run weight-download notification ────────────────────────────
+if (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined') {
+  import('@tauri-apps/api/event').then(({ listen }) => {
+    listen<void>('weights-missing', () => {
+      setStatus('First run: TripoSR weights missing — click to download (~1 GB)');
+      overlay.style.cursor = 'pointer';
+      overlay.onclick = async () => {
+        setStatus('Downloading TripoSR weights…');
+        overlay.style.cursor = '';
+        overlay.onclick = null;
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('download_weights').catch((e: unknown) =>
+          setStatus(`Download error: ${(e as Error).message}`),
+        );
+      };
+    });
+  });
+}
+
 // ── Start button (getUserMedia requires user gesture) ────────────────────────
 const startBtn = document.createElement('div');
 startBtn.id = 'start-screen';
